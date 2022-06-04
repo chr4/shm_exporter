@@ -1,7 +1,7 @@
 package main
 
 import (
-	"encoding/hex"
+	"encoding/binary"
 	"log"
 	"net"
 )
@@ -16,8 +16,18 @@ func main() {
 }
 
 func msgHandler(src *net.UDPAddr, n int, b []byte) {
-	log.Println(n, "bytes read from", src)
-	log.Println(hex.Dump(b[:n]))
+
+	// TODO: Check this
+	// b[16:18] == '\x60\x69'
+	// b[0:3] == "SMA"
+
+	// TODO: function to convert byte range to float
+	totalPowerIn := b[34:36]
+	totalPowerOut := b[54:56]
+	out := float64(binary.BigEndian.Uint16(totalPowerOut)) * 0.1
+	in := float64(binary.BigEndian.Uint16(totalPowerIn)) * 0.1
+
+	log.Printf("out: %f in: %f", out, in)
 }
 
 // Listen binds to the UDP address and port given and writes packets received
