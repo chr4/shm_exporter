@@ -40,18 +40,24 @@ func main() {
 		os.Exit(0)
 	}
 
-	var shmOutWatts = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "shm_out_watts",
-		Help: "SMA Home Manager 2.0 outbound power (sell)",
-	})
 	var shmInWatts = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "shm_in_watts",
-		Help: "SMA Home Manager 2.0 inbound power (buy)",
+		Help: "SMA Home Manager 2.0 in power (buy)",
+	})
+	var shmOutWatts = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "shm_out_watts",
+		Help: "SMA Home Manager 2.0 out power (sell)",
+	})
+	var shmCombinedWatts = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "shm_combined_watts",
+		Help: "SMA Home Manager 2.0 combined in/out power (buy/sell)",
 	})
 
+
 	// Register the summary and the histogram with Prometheus's default registry
-	prometheus.MustRegister(shmOutWatts)
 	prometheus.MustRegister(shmInWatts)
+	prometheus.MustRegister(shmOutWatts)
+	prometheus.MustRegister(shmCombinedWatts)
 
 	// Add Go module build info
 	prometheus.MustRegister(collectors.NewBuildInfoCollector())
@@ -116,6 +122,7 @@ func main() {
 
 				shmInWatts.Set(totalPowerIn)
 				shmOutWatts.Set(totalPowerOut)
+				shmCombinedWatts.Set(totalPowerIn - totalPowerOut)
 			}
 
 			err = conn.Close()
