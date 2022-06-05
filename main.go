@@ -1,12 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"flag"
 	"fmt"
 	"log"
-	"net/http"
 	"net"
+	"net/http"
 	"os"
 	"time"
 
@@ -27,10 +28,9 @@ func init() {
 
 func main() {
 	var (
-		listenAddr   = flag.String("web.listen-address", ":9192", "The address to listen on for HTTP requests.")
+		listenAddr    = flag.String("web.listen-address", ":9192", "The address to listen on for HTTP requests.")
 		multicastAddr = flag.String("multicast.addr", "239.12.255.254:9522", "Multicast address to listen on.")
-		pollInterval = flag.Int("inverter.poll-interval", 5, "Interval in seconds between polls.")
-		showVersion  = flag.Bool("version", false, "Print version information and exit.")
+		showVersion   = flag.Bool("version", false, "Print version information and exit.")
 	)
 
 	flag.Parse()
@@ -58,43 +58,70 @@ func main() {
 
 	// Poll inverter values
 	go func() {
-
-		// Parse the string address
-		addr, err := net.ResolveUDPAddr("udp4", *multicastAddr)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		// Open up a connection
-		conn, err := net.ListenMulticastUDP("udp4", nil, addr)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		conn.SetReadBuffer(maxDatagramSize)
-
-		// Loop forever reading from the socket
 		for {
-			buffer := make([]byte, maxDatagramSize)
-			_, _, err := conn.ReadFromUDP(buffer)
+			// Sleep so we don't retry obsessively on failures
+			time.Sleep(time.Second)
+
+			// Parse the string address
+			addr, err := net.ResolveUDPAddr("udp4", *multicastAddr)
 			if err != nil {
-				log.Fatal("ReadFromUDP failed:", err)
+				log.Println(err)
+				continue
 			}
 
-			// TODO: Check this
-			// buffer[16:18] == '\x60\x69'
-			// buffer[0:3] == "SMA"
+			// Open up a connection
+			conn, err := net.ListenMulticastUDP("udp4", nil, addr)
+			if err != nil {
+				log.Println(err)
+				continue
+			}
 
-			// TODO: function to convert byte range to float
-			totalPowerIn := buffer[34:36]
-			totalPowerOut := buffer[54:56]
-			out := float64(binary.BigEndian.Uint16(totalPowerOut)) * 0.1
-			in := float64(binary.BigEndian.Uint16(totalPowerIn)) * 0.1
+			err = conn.SetReadBuffer(maxDatagramSize)
+			if err != nil {
+				log.Println(err)
+				err = conn.Close()
+				if err != nil {
+					log.Println(err)
+				}
+				continue
+			}
 
-			shmInWatts.Set(in)
-			shmOutWatts.Set(out)
+			// Loop forever reading from the socket
+			for {
+				// Packets should come in around once a second. If we don't receive one for 5s, assume
+				// the connection is dead and restart
+				err = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+				if err != nil {
+					log.Println(err)
+					break
+				}
 
-			time.Sleep(time.Duration(*pollInterval) * time.Second)
+				buffer := make([]byte, maxDatagramSize)
+				_, _, err := conn.ReadFromUDP(buffer)
+				if err != nil {
+					log.Println("ReadFromUDP failed:", err)
+					break
+				}
+
+				// Check whether some magic codes are present to verify this is a message from SHM
+				if bytes.Compare(buffer[0:3], []byte{'S', 'M', 'A'}) != 0 {
+					continue
+				}
+				if bytes.Compare(buffer[16:18], []byte{'\x60', '\x69'}) != 0 {
+					continue
+				}
+
+				totalPowerIn := bufferToFloat(buffer[34:36])
+				totalPowerOut := bufferToFloat(buffer[54:56])
+
+				shmInWatts.Set(totalPowerIn)
+				shmOutWatts.Set(totalPowerOut)
+			}
+
+			err = conn.Close()
+			if err != nil {
+				log.Println(err)
+			}
 		}
 	}()
 
@@ -104,4 +131,9 @@ func main() {
 		promhttp.HandlerOpts{},
 	))
 	log.Fatal(http.ListenAndServe(*listenAddr, nil))
+}
+
+// Convert 16 bit buffer to float64 (Watts require a factor of 0.1)
+func bufferToFloat(b []byte) float64 {
+	return float64(binary.BigEndian.Uint16(b)) * 0.1
 }
