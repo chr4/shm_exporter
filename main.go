@@ -117,8 +117,8 @@ func main() {
 					continue
 				}
 
-				totalPowerIn := bufferToFloat(buffer[34:36])
-				totalPowerOut := bufferToFloat(buffer[54:56])
+				totalPowerIn := bufferToFloat(buffer[32:36])
+				totalPowerOut := bufferToFloat(buffer[52:56])
 
 				shmInWatts.Set(totalPowerIn)
 				shmOutWatts.Set(totalPowerOut)
@@ -140,7 +140,7 @@ func main() {
 	log.Fatal(http.ListenAndServe(*listenAddr, nil))
 }
 
-// Convert 16 bit buffer to float64 (Watts require a factor of 0.1)
+// Convert 32 bit buffer to float64 (Watts require a factor of 0.1)
 func bufferToFloat(b []byte) float64 {
-	return float64(binary.BigEndian.Uint16(b)) * 0.1
+	return float64(binary.BigEndian.Uint32(b)) * 0.1
 }
